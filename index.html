@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Books Book! | 新刊チェッカー</title>
+    <meta name="theme-color" content="#176b5b" />
+    <meta name="description" content="お気に入りの漫画の発売予定をまとめて管理。新刊候補を検索して発売日をカレンダーで確認できます。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Books Book!" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section id="authScreen" class="auth-screen" aria-label="ログイン" >
+  <div class="auth-card">
+    <div class="auth-mark">📚</div>
+    <h1>Books Book!</h1>
+    <p>あなたの新刊リストを、iPhoneとPCで同期。</p>
+    <p id="authNotice" class="auth-notice" role="status" aria-live="polite">ログイン情報を確認しています。</p>
+    <form id="authForm" hidden>
+      <label>メールアドレス<input id="authEmail" type="email" autocomplete="email" required /></label>
+      <label>パスワード<input id="authPassword" type="password" autocomplete="current-password" minlength="6" required /></label>
+      <button id="authLogin" type="submit">ログインする</button>
+      <button id="authRegister" type="button" class="auth-link">初回登録はこちら</button>
+    </form>
+  </div>
+</section>
+<main class="app-shell" id="protectedApp" hidden>
+      <header class="topbar">
+        <div>
+          <p class="kicker">Manga Release Tracker</p>
+          <h1>Books Book! <span class="brand-subtitle">新刊チェッカー</span></h1>
+        </div>
+        <div class="topbar-actions"><span id="authUserEmail" class="auth-user"></span><span id="cloudStatus" class="cloud-status" role="status"></span><button class="ghost-button" id="authLogout" type="button">ログアウト</button>
+          <button class="icon-button" id="seedButton" type="button" title="サンプルを追加" aria-label="サンプルを追加">
+            <span aria-hidden="true">＋</span>
+          </button>
+          <button class="icon-button" id="exportButton" type="button" title="バックアップを書き出し" aria-label="バックアップを書き出し">
+            <span aria-hidden="true">↓</span>
+          </button>
+          <label class="icon-button file-button" title="バックアップを読み込み" aria-label="バックアップを読み込み">
+            <span aria-hidden="true">↑</span>
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+          <label class="icon-button file-button" title="背景画像を設定" aria-label="背景画像を設定">
+            <span aria-hidden="true">🖼️</span>
+            <input id="backgroundInput" type="file" accept="image/*" />
+          </label>
+          <button class="icon-button" id="resetBackgroundButton" type="button" title="背景をリセット" aria-label="背景をリセット">
+            <span aria-hidden="true">⟲</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="install-tip" id="installTip" aria-label="iPhoneで使う方法">
+        <span aria-hidden="true">📱</span><div><strong>iPhoneでアプリのように使う</strong><p>Safariでこのページを開き、共有メニューから「ホーム画面に追加」を選んでください。作品データはログインしたアカウントに同期されます。</p></div>
+        <button id="dismissInstallTip" type="button" aria-label="案内を閉じる">×</button>
+      </section>
+      <section class="welcome-strip" aria-label="使い方"><div><strong>次の一冊を、見逃さない。</strong><p>作品を登録 → 新刊候補を取得 → 発売予定を確認。通知はこのブラウザを開いている間にチェックされます。</p></div><button id="jumpRegister" class="ghost-button" type="button">作品を登録する ↓</button></section>
+
+      <section class="summary-grid" aria-label="概要">
+        <div class="metric">
+          <span class="metric-label">登録作品</span>
+          <strong id="titleCount">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">発売予定</span>
+          <strong id="futureCount">0</strong>
+        </div>
+        <div class="metric alert">
+          <span class="metric-label">通知対象</span>
+          <strong id="noticeCount">0</strong>
+        </div>
+      </section>
+
+      <div class="layout">
+        <section class="panel register-panel" aria-labelledby="registerHeading">
+          <div class="section-head">
+            <h2 id="registerHeading">作品と発売日</h2>
+            <div class="notice-control">
+              <label for="noticeDays">通知</label>
+              <select id="noticeDays">
+                <option value="1">前日</option>
+                <option value="3" selected>3日前</option>
+                <option value="7">7日前</option>
+                <option value="14">14日前</option>
+                <option value="30">30日前</option>
+              </select>
+            </div>
+          </div>
+
+          <form class="form-grid" id="mangaForm">
+            <label class="autocomplete-field">
+              <span>作品名</span>
+              <input id="mangaTitle" name="title" required autocomplete="off" placeholder="例: 星灯りの食卓" />
+              <div id="mangaTitleSuggestions" class="suggestion-list"></div>
+            </label>
+            <label>
+              <span>作者</span>
+              <input id="mangaAuthor" name="author" autocomplete="off" placeholder="任意" />
+            </label>
+            <button class="primary-button" type="submit">登録</button>
+          </form>
+
+          <form class="form-grid release-form" id="releaseForm">
+            <label>
+              <span>作品</span>
+              <select id="releaseManga" required></select>
+            </label>
+            <label>
+              <span>巻数</span>
+              <input id="releaseVolume" name="volume" required inputmode="numeric" placeholder="12" />
+            </label>
+            <label>
+              <span>発売日</span>
+              <input id="releaseDate" name="date" required type="date" />
+            </label>
+            <label>
+              <span>価格（税込・任意）</span>
+              <input id="releasePrice" name="price" inputmode="numeric" placeholder="748" />
+            </label>
+            <label>
+              <span>メモ</span>
+              <input id="releaseMemo" name="memo" autocomplete="off" placeholder="特装版、電子版など" />
+            </label>
+            <button class="primary-button" type="submit">発売日を追加</button>
+          </form>
+
+          <section class="sync-box" aria-labelledby="syncHeading">
+            <div class="section-head">
+              <div>
+                <h2 id="syncHeading">新刊候補の自動取得</h2>
+                <p class="helper-text">登録作品をGoogle Booksで検索し、ISBNが取れた候補はopenBDで発売日を補強します。</p>
+              </div>
+              <button class="primary-button" id="syncButton" type="button">候補を取得</button>
+            </div>
+            <label class="api-key-field">
+              <span>Google Books APIキー</span>
+              <input id="googleApiKey" type="password" autocomplete="off" placeholder="未入力でも試行します" />
+            </label>
+            <label>
+              <span>Discord Webhook URL</span>
+              <input id="discordWebhook" type="text" autocomplete="off" placeholder="https://discord.com/api/webhooks/..." />
+            </label>
+            <div class="sync-status" id="syncStatus" role="status"></div>
+            <div class="candidate-list" id="candidateList"></div>
+          </section>
+        </section>
+
+        <section class="panel calendar-panel" aria-labelledby="calendarHeading">
+          <div class="section-head calendar-head">
+            <button class="icon-button" id="prevMonth" type="button" title="前月" aria-label="前月">‹</button>
+            <h2 id="calendarHeading">発売カレンダー</h2>
+            <button class="icon-button" id="nextMonth" type="button" title="翌月" aria-label="翌月">›</button>
+          </div>
+          <p class="month-label" id="monthLabel"></p>
+          <div class="calendar" id="calendar" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <div class="day-detail-overlay" id="dayDetailOverlay">
+        <div class="day-detail-card">
+          <button class="icon-button day-detail-close" id="dayDetailClose" type="button" title="閉じる" aria-label="閉じる">×</button>
+          <div id="dayDetail"></div>
+        </div>
+      </div>
+
+      <section class="panel manga-list-panel" aria-labelledby="mangaListHeading">
+        <div class="section-head">
+          <h2 id="mangaListHeading">登録作品一覧</h2>
+          <div class="list-toolbar">
+            <div class="search-box">
+              <span aria-hidden="true">🔍</span>
+              <input id="searchInput" type="search" placeholder="作品名・作者・メモで検索" />
+            </div>
+            <label class="sort-select">
+              <span class="sr-only">並び替え</span>
+              <select id="sortOrder">
+                <option value="name">名前順</option>
+                <option value="nextRelease">発売が近い順</option>
+                <option value="recentlyAdded">最近登録した順</option>
+              </select>
+            </label>
+            <button class="ghost-button" id="notifyButton" type="button">通知を確認</button>
+          </div>
+        </div>
+        <div class="manga-list-scroll" id="mangaList" aria-live="polite"></div>
+      </section>
+
+      <aside class="drawer" aria-labelledby="noticeHeading">
+        <div class="section-head">
+          <h2 id="noticeHeading">新刊発売通知</h2>
+          <button class="ghost-button" id="todayButton" type="button">今日へ</button>
+        </div>
+        <div class="notification-settings"><label class="toggle-setting"><input id="autoNotify" type="checkbox" /> ブラウザを開いている間、自動で通知する</label><p class="helper-text" id="notificationHelp">通知にはブラウザの許可が必要です。ページを閉じている間は通知されません。</p></div>
+        <div class="notice-list" id="noticeList"></div>
+      </aside>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <strong>まだ登録がありません</strong>
+        <span>作品と発売日を追加すると、通知一覧とカレンダーに反映されます。</span>
+      </div>
+    </template>
+
+    <script src="./config.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+    <script src="./auth.js" defer></script>
+    <script src="./app.js" defer></script>
+    <script>
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));
+      }
+      const tip = document.getElementById('installTip');
+      if (localStorage.getItem('booksbook.installTipDismissed') === 'yes' ||
+          window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) tip.hidden = true;
+      document.getElementById('dismissInstallTip').addEventListener('click', () => {
+        tip.hidden = true;
+        localStorage.setItem('booksbook.installTipDismissed', 'yes');
+      });
+    </script>
+  </body>
+</html>
