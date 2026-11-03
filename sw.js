@@ -1,5 +1,5 @@
 // Only static application assets are cached; external book APIs remain network-only.
-const CACHE = 'booksbook-static-v2';
+const CACHE = 'booksbook-static-v3';
 const FILES = ['./', './index.html', './styles.css', './app.js', './auth.js', './config.js', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));

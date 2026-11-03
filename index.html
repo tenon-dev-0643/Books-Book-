@@ -8,6 +8,9 @@
     <meta name="description" content="お気に入りの漫画の発売予定をまとめて管理。新刊候補を検索して発売日をカレンダーで確認できます。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://www.googleapis.com" />
+    <link rel="preconnect" href="https://ndlsearch.ndl.go.jp" />
+    <link rel="preconnect" href="https://api.openbd.jp" />
     <link
       href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap"
       rel="stylesheet"
@@ -204,6 +207,26 @@
         <div class="notification-settings"><label class="toggle-setting"><input id="autoNotify" type="checkbox" /> ブラウザを開いている間、自動で通知する</label><p class="helper-text" id="notificationHelp">通知にはブラウザの許可が必要です。ページを閉じている間は通知されません。</p></div>
         <div class="notice-list" id="noticeList"></div>
       </aside>
+
+      <div class="day-detail-overlay" id="shortcutHelpOverlay">
+        <div class="day-detail-card">
+          <button class="icon-button day-detail-close" id="shortcutHelpClose" type="button" title="閉じる" aria-label="閉じる">×</button>
+          <div class="day-detail-title">キーボードショートカット</div>
+          <dl class="shortcut-list">
+            <div><dt><kbd>/</kbd></dt><dd>作品検索にフォーカス</dd></div>
+            <div><dt><kbd>n</kbd></dt><dd>作品登録の入力欄へ移動</dd></div>
+            <div><dt><kbd>Esc</kbd></dt><dd>開いている表示を閉じる</dd></div>
+            <div><dt><kbd>?</kbd></dt><dd>この一覧を開く／閉じる</dd></div>
+          </dl>
+          <p class="helper-text">入力欄にフォーカス中と日本語変換中は、Esc 以外は動作しません。</p>
+        </div>
+      </div>
+
+      <div class="lightbox" id="lightbox" hidden>
+        <img id="lightboxImg" alt="表紙の拡大画像" />
+        <button class="icon-button lightbox-close" id="lightboxClose" type="button" aria-label="閉じる">×</button>
+      </div>
+
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </main>
 
