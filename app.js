@@ -352,6 +352,8 @@ function buildMangaCard(title, releases) {
     const img = document.createElement("img");
     img.src = title.thumbnailUrl;
     img.alt = "";
+    img.title = "タップで拡大";
+    img.addEventListener("click", () => openLightbox(title.thumbnailUrl));
     cover.append(img);
   } else {
     cover.textContent = "No image";
@@ -547,6 +549,7 @@ function renderNotices() {
       const img = document.createElement("img");
       img.src = coverUrl;
       img.alt = "";
+      img.addEventListener("click", () => openLightbox(coverUrl));
       cover.append(img);
     }
     if (!release.thumbnailConfirmed) {
@@ -708,6 +711,36 @@ function renderDayDetail() {
   els.dayDetail.replaceChildren(wrapper);
   els.dayDetailOverlay.classList.add("visible");
 }
+
+
+// ==============================
+// 表紙の拡大表示（ライトボックス）
+// ==============================
+// Google Books の表紙は zoom=0 で大きい版が返ることがあるので、拡大時だけ差し替える
+function hiResCoverUrl(url) {
+  const u = String(url || "").replace(/^http:/, "https:");
+  if (!u.includes("books.google")) return u;
+  return u.replace(/([?&])zoom=\d/, "$1zoom=0").replace(/&edge=curl/g, "");
+}
+function openLightbox(url) {
+  if (!url) return;
+  const img = document.querySelector("#lightboxImg");
+  const original = String(url).replace(/^http:/, "https:");
+  img.onerror = () => {
+    img.onerror = null;
+    if (img.src !== original) img.src = original;
+  };
+  img.src = hiResCoverUrl(original);
+  document.querySelector("#lightbox").hidden = false;
+}
+function closeLightbox() {
+  document.querySelector("#lightbox").hidden = true;
+  document.querySelector("#lightboxImg").removeAttribute("src");
+}
+document.querySelector("#lightboxClose").addEventListener("click", closeLightbox);
+document.querySelector("#lightbox").addEventListener("click", (event) => {
+  if (event.target.id === "lightbox") closeLightbox();
+});
 
 function closeDayDetail() {
   state.selectedCalendarDate = null;
@@ -1375,8 +1408,81 @@ async function ensureTitleThumbnail(title) {
 // ==============================
 const suggestionCache = new Map();
 let suggestionCooldownUntil = 0;
+let suggestSeq = 0;
+let suggestAbort = null;
 
+async function googleSuggestions(query, signal) {
+  if (Date.now() < suggestionCooldownUntil) return [];
+  const params = new URLSearchParams({
+    q: `intitle:${query}`,
+    printType: "books",
+    langRestrict: "ja",
+    maxResults: "6",
+    // 必要な項目だけ返させて応答を軽くする
+    fields: "items(volumeInfo(title,authors))",
+  });
+  if (state.googleApiKey) params.set("key", state.googleApiKey);
+  const response = await fetch(`https://www.googleapis.com/books/v1/volumes?${params.toString()}`, { signal });
+  if (response.status === 429) {
+    suggestionCooldownUntil = Date.now() + 60000;
+    return [];
+  }
+  if (!response.ok) return [];
+  const data = await response.json();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const seen = new Set();
+  const suggestions = [];
+  for (const item of items) {
+    const info = item.volumeInfo || {};
+    const seriesName = guessSeriesName(info.title);
+    if (!seriesName || seen.has(seriesName)) continue;
+    seen.add(seriesName);
+    suggestions.push({ name: seriesName, author: (info.authors || [])[0] || "" });
+  }
+  return suggestions;
+}
+
+async function ndlSuggestions(query, signal) {
+  const params = new URLSearchParams({ cnt: "10", title: query, mediatype: "books" });
+  const response = await fetch(`https://ndlsearch.ndl.go.jp/api/opensearch?${params.toString()}`, { signal });
+  if (!response.ok) return [];
+  const doc = new DOMParser().parseFromString(await response.text(), "application/xml");
+  return [...doc.getElementsByTagName("item")]
+    .map((item) => ({
+      name: guessSeriesName(xmlText(item, "title")),
+      author: (xmlText(item, "dc:creator") || xmlText(item, "author")).split(",")[0].trim(),
+    }))
+    .filter((s) => s.name);
+}
+
+function mergeSuggestionLists(lists, limit = 6) {
+  const seen = new Set();
+  const out = [];
+  for (const list of lists) {
+    for (const s of list || []) {
+      if (!s?.name || seen.has(s.name)) continue;
+      seen.add(s.name);
+      out.push(s);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+// プレフィックスキャッシュ: 「フリーレ」の結果を「フリーレン」入力時に絞って流用する
+function prefixCachedSuggestions(query) {
+  let bestKey = "";
+  for (const key of suggestionCache.keys()) {
+    if (key && query.startsWith(key) && key.length > bestKey.length) bestKey = key;
+  }
+  if (!bestKey) return [];
+  const nq = normalizeText(query);
+  return suggestionCache.get(bestKey).filter((s) => normalizeText(s.name).includes(nq));
+}
+
+// 高速化: (1)通信なし候補を即表示 (2)Googleが700msで返らなければNDLも並行 (3)旧リクエストはabort
 async function fetchTitleSuggestions(query) {
+  const seq = ++suggestSeq;
   if (!query || query.length < 2) {
     els.mangaTitleSuggestions.replaceChildren();
     return;
@@ -1387,44 +1493,39 @@ async function fetchTitleSuggestions(query) {
     return;
   }
 
-  if (Date.now() < suggestionCooldownUntil) return;
+  const local = state.titles
+    .filter((t) => normalizeText(t.name).includes(normalizeText(query)))
+    .map((t) => ({ name: t.name, author: t.author || "" }));
 
+  // 第1段: 登録済み＋キャッシュ流用を即表示（通信を待たない）
+  const instant = mergeSuggestionLists([local, prefixCachedSuggestions(query)]);
+  if (instant.length) renderTitleSuggestions(instant);
+
+  // 前のリクエストは打ち切って帯域を空ける
+  suggestAbort?.abort();
+  const abort = new AbortController();
+  suggestAbort = abort;
+
+  // 第2段: Google。700ms経っても返らなければNDLも並行して走らせる
+  let ndlPromise = null;
+  const hedge = setTimeout(() => {
+    ndlPromise = ndlSuggestions(query, abort.signal).catch(() => []);
+  }, 700);
+  let remote = [];
   try {
-    const params = new URLSearchParams({
-      q: `intitle:${query}`,
-      printType: "books",
-      langRestrict: "ja",
-      maxResults: "8",
-    });
-    if (state.googleApiKey) params.set("key", state.googleApiKey);
-
-    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?${params.toString()}`);
-
-    if (response.status === 429) {
-      suggestionCooldownUntil = Date.now() + 60000;
-      return;
-    }
-    if (!response.ok) return;
-
-    const data = await response.json();
-    const items = Array.isArray(data.items) ? data.items : [];
-
-    const seen = new Set();
-    const suggestions = [];
-    for (const item of items) {
-      const info = item.volumeInfo || {};
-      const seriesName = guessSeriesName(info.title);
-      if (!seriesName || seen.has(seriesName)) continue;
-      seen.add(seriesName);
-      suggestions.push({ name: seriesName, author: (info.authors || [])[0] || "" });
-    }
-
-    const result = suggestions.slice(0, 5);
-    suggestionCache.set(query, result);
-    renderTitleSuggestions(result);
-  } catch {
-    els.mangaTitleSuggestions.replaceChildren();
+    remote = await googleSuggestions(query, abort.signal);
+  } catch {}
+  clearTimeout(hedge);
+  if (!remote.length) {
+    try {
+      remote = await (ndlPromise || ndlSuggestions(query, abort.signal));
+    } catch {}
   }
+  if (seq !== suggestSeq) return; // もっと新しい入力があった
+
+  const result = mergeSuggestionLists([local, remote]);
+  if (remote.length) suggestionCache.set(query, result);
+  renderTitleSuggestions(result);
 }
 
 function renderTitleSuggestions(suggestions) {
@@ -1450,7 +1551,7 @@ function renderTitleSuggestions(suggestions) {
   els.mangaTitleSuggestions.replaceChildren(...items);
 }
 
-const debouncedFetchSuggestions = debounce(fetchTitleSuggestions, 500);
+const debouncedFetchSuggestions = debounce(fetchTitleSuggestions, 250);
 
 // ==============================
 // Discord通知
@@ -1744,8 +1845,52 @@ els.dayDetailClose.addEventListener("click", closeDayDetail);
 els.dayDetailOverlay.addEventListener("click", (event) => {
   if (event.target === els.dayDetailOverlay) closeDayDetail(); // 背景部分のクリックだけを閉じる対象にする
 });
+// ==============================
+// キーボードショートカット
+// ==============================
+function openShortcutHelp() {
+  document.querySelector("#shortcutHelpOverlay").classList.add("visible");
+}
+function closeShortcutHelp() {
+  document.querySelector("#shortcutHelpOverlay").classList.remove("visible");
+}
+document.querySelector("#shortcutHelpClose").addEventListener("click", closeShortcutHelp);
+document.querySelector("#shortcutHelpOverlay").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeShortcutHelp();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.selectedCalendarDate) closeDayDetail();
+  if (event.isComposing) return; // 日本語変換中は誤発動させない
+  if (event.key === "Escape") {
+    if (state.selectedCalendarDate) closeDayDetail();
+    closeShortcutHelp();
+    closeLightbox();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return; // ブラウザ/OSの操作を奪わない
+  const target = event.target;
+  const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement || target?.isContentEditable;
+  if (editing) return; // 入力中は Esc 以外無効
+  if (event.key === "?") {
+    event.preventDefault();
+    const overlay = document.querySelector("#shortcutHelpOverlay");
+    if (overlay.classList.contains("visible")) closeShortcutHelp(); else openShortcutHelp();
+    return;
+  }
+  // 何か開いている間は Esc と ? 以外無効
+  if (els.dayDetailOverlay.classList.contains("visible")
+    || document.querySelector("#shortcutHelpOverlay").classList.contains("visible")
+    || !document.querySelector("#lightbox").hidden) return;
+  if (event.key === "/") {
+    event.preventDefault();
+    els.searchInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    els.searchInput.focus({ preventScroll: true });
+    els.searchInput.select();
+  } else if (event.key === "n") {
+    event.preventDefault();
+    els.mangaTitle.scrollIntoView({ behavior: "smooth", block: "center" });
+    els.mangaTitle.focus({ preventScroll: true });
+  }
 });
 els.syncButton.addEventListener("click", syncCandidates);
 els.seedButton.addEventListener("click", addSampleData);
